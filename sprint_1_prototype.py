@@ -33,26 +33,31 @@ def convert_range(x, servo_min, servo_max, _min=0, _max=2**16):
     value = int(value)  # truncate the value
     return value * 1000  # convert back into servo_min to servo_max range
 
-while True:
-    # get x and y values from joystick as numbers from 0 - 65 (integers)
-    x = int(x_input.read_u16() / 1000)
-    y = int(y_input.read_u16() / 1000)
-    print(convert_range(y_input.read_u16(), SERVO_MIN, SERVO_MAX))
-    # send servo value to servo
-    servo.duty_u16(convert_range(y_input.read_u16(), SERVO_MIN, SERVO_MAX))
-    
-    if x > 36:
-        neutral_light.value(0)
-        drive_light.value(0)
-        reverse_light.value(1)
-    elif x < 28:
-        neutral_light.value(0)
-        drive_light.value(1)
-        reverse_light.value(0)
-    else:
-        neutral_light.value(1)
-        drive_light.value(0)
-        reverse_light.value(0)
+try:
+    while True:
+        # get x and y values from joystick as numbers from 0 - 65 (integers)
+        x = int(x_input.read_u16() / 1000)
+        y = int(y_input.read_u16() / 1000)
+        print(convert_range(y_input.read_u16(), SERVO_MIN, SERVO_MAX))
+        # send servo value to servo
+        servo.duty_u16(convert_range(y_input.read_u16(), SERVO_MIN, SERVO_MAX))
         
-    time.sleep(0.05)
+        if x > 36:
+            neutral_light.value(0)
+            drive_light.value(0)
+            reverse_light.value(1)
+        elif x < 28:
+            neutral_light.value(0)
+            drive_light.value(1)
+            reverse_light.value(0)
+        else:
+            neutral_light.value(1)
+            drive_light.value(0)
+            reverse_light.value(0)
+            
+        time.sleep(0.05)
+finally:
+    neutral_light.value(0)
+    drive_light.value(0)
+    reverse_light.value(0)
 
