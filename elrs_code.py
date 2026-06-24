@@ -76,7 +76,7 @@ while True:
                     # switches are left to right for me on my controller and I only have 4
                     channels = decode(payload)
                     
-                    print(f'Joysticks (x, y): ({channels[3]}, {channels[2]}), ({channels[0]}, {channels[1]})')
+                    print(f'\n\n\n\n\nJoysticks (x, y): ({channels[3]}, {channels[2]}), ({channels[0]}, {channels[1]})')
                     print(f'Switches:         [{channels[4]}], [{channels[5]}], [{channels[6]}], [{channels[7]}]')
                     print(f'signal data: {last_signal_strength}dbm, {last_signal_quality}%')
                     continue
@@ -90,4 +90,4 @@ while True:
                     last_signal_quality = stats['lq']
                     continue
 
-    time.sleep(0.1)
+    time.sleep(1)
