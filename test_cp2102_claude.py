@@ -3,8 +3,8 @@ import time
 
 ser = serial.Serial('COM10', 420000, timeout=1)
 
-def decode(payload):
-    data = payload[1:]
+def decode(payload):   # type: ignore
+    data = payload[1:]  # type: ignore
     channels = [0] * 8
     channels[0] = (data[0] | (data[1] << 8)) & 0x07FF
     channels[1] = (data[1] >> 3 | data[2] << 5) & 0x07FF
@@ -16,9 +16,9 @@ def decode(payload):
     channels[7] = ((data[9] >> 5) | (data[10] << 3)) & 0x07FF
     return channels
 
-def decode_signal_data(payload):
+def decode_signal_data(payload):  # type: ignore
     return {
-        "rssi1": -payload[1],
+        "rssi1": -payload[1],  # type: ignore
         "rssi2": -payload[2],
         "lq": payload[3]
     }

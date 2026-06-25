@@ -9,8 +9,8 @@ def decode_signal_data(payload):  # type: ignore
     
     return {
         "rssi1": uplink_rssi1,  # type: ignore
-        "rssi2": uplink_rssi2,  # type: ignore
-        "lq": link_quality  # type: ignore
+        "rssi2": uplink_rssi2,
+        "lq": link_quality
     }
 
 # Initialize webcam (0 is usually the default built-in camera)
