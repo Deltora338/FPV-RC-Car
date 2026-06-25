@@ -22,6 +22,8 @@ except Exception as e:
     print(e)
     com = False
 
+telemetry_string = "No COM port connected"
+
 if not cap.isOpened():
     print("Error: Could not open webcam.")
     exit()
@@ -42,9 +44,9 @@ while True:
 
     # Drain whatever is available and append to buffer
     if com:
-        waiting = ser.in_waiting
+        waiting = ser.in_waiting  # type: ignore
         if waiting:
-            buf += ser.read(waiting)
+            buf += ser.read(waiting)  # type: ignore
         
         # Process all complete frames in the buffer
         i = 0
@@ -82,22 +84,21 @@ while True:
 
         # 3. Overlay the telemetry onto the frame
         # cv2.putText parameters: (image, text, position (x,y), font, font_scale, color (BGR), thickness)
-        cv2.putText(
-            img=frame,
-            text=telemetry_string,
-            org=(20, 40),  # Coordinates of the bottom-left corner of the text
-            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=0.7,
-            color=(0, 255, 0),  # Bright green in BGR
-            thickness=2,
-            lineType=cv2.LINE_AA
-        )
+    cv2.putText(
+        img=frame,
+        text=telemetry_string,
+        org=(20, 40),  # Coordinates of the bottom-left corner of the text
+        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        fontScale=0.7,
+        color=(0, 255, 0),  # Bright green in BGR
+        thickness=2,
+        lineType=cv2.LINE_AA
+    )
 
     # 4. Display the resulting frame
     cv2.imshow('Telemetry Overlay Feed', frame)
 
-    # Break the loop if 'q' key is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.getWindowProperty('Telemetry Overlay Feed', cv2.WND_PROP_VISIBLE) < 1:
         break
 
 # Clean up and close windows
