@@ -82,13 +82,14 @@ while True:
 
         # 3. Overlay the telemetry onto the frame
         # cv2.putText parameters: (image, text, position (x,y), font, font_scale, color (BGR), thickness)
+    
     cv2.putText(
         img=frame,
         text=telemetry_string,
         org=(20, 40),  # Coordinates of the bottom-left corner of the text
         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
         fontScale=0.7,
-        color=(0, 255, 0),  # Bright green in BGR
+        color=(0, 0, 255),  # Bright green in BGR
         thickness=2,
         lineType=cv2.LINE_AA
     )
