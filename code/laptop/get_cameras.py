@@ -1,15 +1,16 @@
 import cv2
 
-def find_available_cameras(max_tested=10):
-    available_cameras = []
+def find_available_cameras(max_tested: int=10) -> list[int]:
+    available_cameras: list[int] = []
     
     print("Scanning for available cameras... Please wait.")
     print("-" * 45)
     
     for index in range(max_tested):
-        # cv2.CAP_DSHOW speeds up the scanning process significantly on Windows
-        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        # cv2.CAP_DSHOW speeds up the scanning process significantly on Windows        
         
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+
         if cap.isOpened():
             # Try to grab a frame just to be absolutely sure it's working
             is_reading, _ = cap.read()
