@@ -1,19 +1,19 @@
+"""Main file which imports and runs the main loop code
+"""
+
 from machine import Pin, PWM, UART
 import time
+from config import *
 
-servo = PWM(Pin(15, Pin.OUT, Pin.PULL_DOWN))
 servo.freq(50)
 
-esc = PWM(Pin(14, Pin.OUT, Pin.PULL_DOWN))  # pull down resistor to eliminate noise on the line
 esc.freq(50)  # standard freq
-esc.duty_u16(4915)  # neutral duty cycle
+esc.duty_u16(ESC_DUTY_NEUTRAL)  # neutral duty cycle
 
-uart0 = UART(0, baudrate=420000, rx=Pin(1), tx=Pin(0))  # control elrs
+boot_led.value(0)
+main_led.value(1)
 
-led = Pin(25, Pin.OUT)
-led.value(1)
-
-def steering(angle, select_servo):
+def steering(angle, select_servo) -> None:
     if angle < 0:
         angle = 0
     elif angle > 180:
@@ -22,17 +22,24 @@ def steering(angle, select_servo):
     duty = int(1637 + (angle / 180) * (8192 - 1638))
     select_servo.duty_u16(duty)
     
-def throttle(raw_value, esc_):
-    if raw_value < 174:
-        raw_value = 174
-    elif raw_value > 1811:
-        raw_value = 1811
+def throttle(raw_value, esc_, gear_) -> None:
+    if raw_value < JOYSTICK_MIN:
+        raw_value = JOYSTICK_MIN
+    elif raw_value > JOYSTICK_MAX:
+        raw_value = JOYSTICK_MAX
+    
+    # map joystick range (1811 - 174), to 3276 - 6553 (1ms to 2ms PWM signal)
+    
+    if gear = 'drive':
+        duty = (raw_value - JOYSTICK_MIN) + ESC_DUTY_NEUTRAL
+    elif gear = 'reverse':
+        duty = (raw_value - JOYSTICK_MAX) + ESC_DUTY_NEUTRAL
+    else:  # neutral or fallback
+        esc_.duty_u16(ESC_DUTY_NEUTRAL)
         
-    # map joystick accross range 1811 - 174, to 3276 - 6553 (1ms to 2ms PWM signal)
-    duty = int(3276 + ((raw_value - 174) / (1637)) * (6553 - 3276))
     esc_.duty_u16(duty)
 
-def decode(payload):
+def decode(payload) -> list[int]:
     data = payload[1:]
     
     channels = [0] * 8
@@ -85,20 +92,24 @@ def read_control(lss, lsq):
         data_length = len(raw_data)
         
         i = 0
-        while i < (data_length - 4):  # needs to be at least long enough for a header + lengthte
+        while i < (data_length - 4):  # needs to be at least long enough for a header + length byte + sync + crc
+
             # check for crsf header
             if raw_data[i] == 0xC8:
                 length = raw_data[i+1]
                 
                 # check length is valid
                 if i + 2 + length <= data_length:
-                    # take the part that crc is calculated on
+    
+                    # take the part of the packet that crc is calculated on
                     # and the crc that is transmitted with the packet
+    
                     crc_data = raw_data[i+2 : i+1+length] 
                     expected_crc = raw_data[i+1+length]
                     
                     # calculate and compare the crc
                     if crsf_crc8(crc_data) == expected_crc:
+
                         packet_type = raw_data[i+2]
                         payload = raw_data[i+2 : i+1+length] # type + Payload
                         
@@ -125,42 +136,40 @@ def read_control(lss, lsq):
                 'raw_channels': channels,
                 'last_signal_strength': last_signal_strength,
                 'last_signal_quality': last_signal_quality,
-                "switch1": channels[4],
-                "switch2": channels[5],
+                "armed": channels[4],
+                "gear": channels[5],
                 "switch3": channels[6],
                 "switch4": channels[7],
             }
             
     return None
 
-controller_data = {
-    'steering': 992,
-    'throttle': 992,
-    'raw_channels': [992] * 8,
-    'last_signal_strength': 0,
-    'last_signal_quality': 0
-}
-
-esc.duty_u16(4915)
-time.sleep(5)
-led.value(0)
 
 while True:
-    rx_control = read_control(controller_data['last_signal_strength'], controller_data['last_signal_quality'])
+    rx_control = read_control(controller_data['last_signal_strength'],
+                              controller_data['last_signal_quality'])
     
     if rx_control is not None:
         controller_data = rx_control
         
         raw_steering = controller_data['steering']
         
-        steering_angle = round((raw_steering - 174) * (55 - 125) / (1811 - 174) + 125)
-        steering((180 - steering_angle), servo) # servo is mounted upside down
+        # gear lever either 174, 992 or 1811
+        if controller_data['gear'] > 1000:
+            gear = "drive"
+        elif controller_data['gear'] < 500:
+            gear = "reverse"
+        else:
+            gear = "neutral"
+        
+        steering_angle = round((raw_steering - JOYSTICK_MIN) * (55 - 125) / (JOYSTICK_RANGE) + 125)
+        steering((180 - steering_angle), servo) # servo is mounted upside down, so invert the input
         
         raw_throttle = controller_data['throttle']
-        throttle(raw_throttle, esc)
+        throttle(raw_throttle, esc, gear)
         
         # print Debug info
-        ch = controller_data['raw_channels']
+        # ch = controller_data['raw_channels']
         # print(f'Throttle: {ch[2]}')
         # print(f'Steering {abs(ch[0] - 992)} {"left" if (ch[0] - 992) <= 0 else "right"}')
         # print(f'Signal: {controller_data["last_signal_strength"]}dBm, {controller_data["last_signal_quality"]}%')
