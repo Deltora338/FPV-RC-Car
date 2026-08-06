@@ -15,4 +15,3 @@ from config import boot_led
 boot_led.value(1)
 
 time.sleep(5)
-
