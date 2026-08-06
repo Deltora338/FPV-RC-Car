@@ -30,9 +30,9 @@ def throttle(raw_value, esc_, gear_) -> None:
     
     # map joystick range (1811 - 174), to 3276 - 6553 (1ms to 2ms PWM signal)
     
-    if gear = 'drive':
+    if gear == 'drive':
         duty = (raw_value - JOYSTICK_MIN) + ESC_DUTY_NEUTRAL
-    elif gear = 'reverse':
+    elif gear == 'reverse':
         duty = (raw_value - JOYSTICK_MAX) + ESC_DUTY_NEUTRAL
     else:  # neutral or fallback
         esc_.duty_u16(ESC_DUTY_NEUTRAL)
@@ -169,9 +169,11 @@ while True:
         throttle(raw_throttle, esc, gear)
         
         # print Debug info
-        # ch = controller_data['raw_channels']
-        # print(f'Throttle: {ch[2]}')
-        # print(f'Steering {abs(ch[0] - 992)} {"left" if (ch[0] - 992) <= 0 else "right"}')
+        ch = controller_data['raw_channels']
+        print(f'Throttle: {ch[2]}')
+        print(f'Steering {abs(ch[0] - 992)} {"left" if (ch[0] - 992) <= 0 else "right"}')
         # print(f'Signal: {controller_data["last_signal_strength"]}dBm, {controller_data["last_signal_quality"]}%')
     
     time.sleep(0.01)
+
+

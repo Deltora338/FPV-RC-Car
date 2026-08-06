@@ -4,13 +4,15 @@ This is why the esc pin is defined and used before importing time,
 otherwise we miss the window'''
 
 from machine import Pin, PWM
-import time
-from config import boot_led
 
-esc = PWM(Pin(14, Pin.OUT, Pin.PULL_DOWN))  # pull down resistor to eliminate electrical noise on the line
+esc = PWM(Pin(2, Pin.OUT, Pin.PULL_DOWN))  # pull down resistor to eliminate electrical noise on the line
 esc.freq(50)  # standard freq
 esc.duty_u16(4915)  # neutral duty cycle
+
+import time
+from config import boot_led
 
 boot_led.value(1)
 
 time.sleep(5)
+
