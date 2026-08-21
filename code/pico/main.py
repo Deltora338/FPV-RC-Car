@@ -6,10 +6,10 @@ from config import Main
 import time
 
 
-def run(time_input, camera_input):
+def run(time_input):
     # Instantiate and initialize hardware once outside the execution loop
     try:
-        script = Main(time_input, camera_input)
+        script = Main(time_input)
         script.initialise()
     except Exception as e:
         log_error(e)

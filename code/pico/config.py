@@ -23,15 +23,9 @@ class Main():
         # adc pins (battery and temp voltage dividers)
         self.battery_adc_pin = ADC(28)
 
-        # status leds
         self.boot_led = Pin(25, Pin.OUT) # 16
-        self.main_led = Pin(17, Pin.OUT) # 17
-        self.control_led = Pin(18, Pin.OUT)
-        self.telem_led = Pin(19, Pin.OUT)
 
-        self.low_voltage_led = Pin(20, Pin.OUT)
         self.relay = Pin(14, Pin.OUT, value=1)
-        self.VTX_status_led = Pin(21, Pin.OUT)
 
         # default for self.initialse
         self.battery_voltage = None
@@ -48,6 +42,7 @@ class Main():
         self.camera_start_time = 0
         self.is_camera_on = False
         self.allow_camera = False
+        self.camera_control_state = False
         
         self.allowance_remaining = 0
         self.cooldown_remaining = 0
@@ -284,7 +279,6 @@ class Main():
     def initialise(self):
         self.relay_off()
         self.boot_led.value(0)
-        self.main_led.value(1)
         while (self.battery_voltage is None) or  (self.elrs_connection is None):
             self.read_battery_voltage(True)
             data = self.read_control()
@@ -310,8 +304,8 @@ class Main():
                         self.camera_control_state = True
                     else:
                         self.camera_control_state = False
-            else:
-                self.is_armed = False
+                else:
+                    self.is_armed = False
 
 
     def telemetry(self) -> None:
@@ -352,6 +346,13 @@ class Main():
         while True:
             self.read_battery_voltage()
             self.control()
+            if self.camera_control_state:
+                self.relay_on()
+            else:
+                self.relay_off()
             self.relay_update()
             self.telemetry()
+            
+            
+
 
