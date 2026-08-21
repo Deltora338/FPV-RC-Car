@@ -10,8 +10,10 @@ esc.freq(50)  # standard freq
 esc.duty_u16(4915)  # neutral duty cycle
 
 import time
-from config import boot_led
 
-boot_led.value(1)
+led = Pin(25, Pin.OUT)
+led.value(1)
+
 
 time.sleep(5)
+led.value(0)
