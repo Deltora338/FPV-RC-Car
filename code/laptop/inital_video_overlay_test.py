@@ -1,24 +1,13 @@
 import cv2
 import serial
-
-def decode_signal_data(payload):  # type: ignore
-    # dBm
-    uplink_rssi1 = -payload[1]  # type: ignore
-    uplink_rssi2 = -payload[2]   # type: ignore
-    link_quality = payload[3]    # type: ignore
-    
-    return {
-        "rssi1": uplink_rssi1,  # type: ignore
-        "rssi2": uplink_rssi2,
-        "lq": link_quality
-    }
+import time
 
 # Initialize webcam (0 is usually the default built-in camera)
 # cap = cv2.VideoCapture(1)
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
 try:
-    ser = serial.Serial('COM10', 420000, timeout=1)
+    ser = serial.Serial('COM16', 420000, timeout=1)
     com = True
 except Exception as e:
     print(e)
@@ -51,34 +40,6 @@ while True:
         # Process all complete frames in the buffer
         channels = [0] * 8  # Initialize channels to avoid reference before assignment
 
-        while 3 <= len(buf):
-            # CRSF frame: [sync] [length] [type] [payload...] [crc]
-            # sync byte is 0xC8 (from FC) or 0xEE (from TX) — but your Pico used 0x16/0x14 as type bytes
-            # so we look for the frame where buf[i] is the sync, buf[i+1] is length
-            
-            if 3 >= len(buf):
-                break  # data piece too short
-            
-            sync = buf[0]
-            if sync not in (0xC8, 0xEE):
-                buf.pop(0)
-                continue
-            
-            frame_len = buf[1]  # length includes type + payload + crc, not sync or length itself
-            total_frame = 2 + frame_len  # sync + length byte + rest
-            
-            if total_frame > len(buf):
-                break  # frame not complete yet, wait for more data
-            
-            frame_type = buf[2]
-            payload = buf[2 : total_frame - 1]  # exclude crc at end
-        
-            if frame_type == 0x14 and len(payload) >= 4:
-                stats = decode_signal_data(payload)
-                last_signal_strength = stats['rssi1']
-                last_signal_quality = stats['lq']
-            
-        telemetry_string = f"Signal: {last_signal_strength}dBm, {last_signal_quality}%"
 
         # 3. Overlay the telemetry onto the frame
         # cv2.putText parameters: (image, text, position (x,y), font, font_scale, color (BGR), thickness)
@@ -103,6 +64,8 @@ while True:
 
     if cv2.getWindowProperty('Telemetry Overlay Feed', cv2.WND_PROP_VISIBLE) < 1:
         break
+
+    time.sleep(0.01)
 
 # Clean up and close windows
 cap.release()

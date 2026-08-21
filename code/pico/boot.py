@@ -14,6 +14,6 @@ import time
 led = Pin(25, Pin.OUT)
 led.value(1)
 
-
-time.sleep(5)
+time.sleep(4)
 led.value(0)
+

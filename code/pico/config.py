@@ -3,22 +3,25 @@ used in main.py
 """
 
 from machine import Pin, PWM, UART, ADC
-import lib, math, time, json
+import time, json
 
 
 class Main():
-    def __init__(self) -> None:
+    def __init__(self, start_time) -> None:
+        self.start_time = start_time
+        
         # servo and esc PWM pins
         self.servo = PWM(Pin(15, Pin.OUT, Pin.PULL_DOWN))
-        self.esc = PWM(Pin(2, Pin.OUT, Pin.PULL_DOWN))  # pull down resistor to eliminate noise on the line
+        self.servo.freq(50)
+        self.esc = PWM(Pin(2, Pin.OUT, Pin.PULL_DOWN))
+        self.esc.freq(50)
 
         # both uart modules with the
         self.uart_elrs = UART(0, baudrate=420000, rx=Pin(1, Pin.IN, Pin.PULL_DOWN), tx=Pin(0, Pin.OUT, Pin.PULL_DOWN))  # control elrs
-        self.uart_telem = UART(1, baudrate=57600, rx=Pin(5, Pin.IN, Pin.PULL_DOWN), tx=Pin(4, Pin.OUT, Pin.PULL_DOWN)) # telemetry link
+        self.uart_telem = UART(1, baudrate=57600, rx=Pin(9, Pin.IN, Pin.PULL_DOWN), tx=Pin(8, Pin.OUT, Pin.PULL_DOWN)) # telemetry link
 
         # adc pins (battery and temp voltage dividers)
         self.battery_adc_pin = ADC(28)
-        self.vtx_temp_adc_pin = ADC(26)
 
         # status leds
         self.boot_led = Pin(25, Pin.OUT) # 16
@@ -27,75 +30,142 @@ class Main():
         self.telem_led = Pin(19, Pin.OUT)
 
         self.low_voltage_led = Pin(20, Pin.OUT)
-        self.relay = Pin(13, Pin.OUT)
+        self.relay = Pin(14, Pin.OUT, value=1)
         self.VTX_status_led = Pin(21, Pin.OUT)
-        self.VTX_temp_led = Pin(22, Pin.OUT)
 
         # default for self.initialse
         self.battery_voltage = None
-        self.vtx_temp = None
+        self.last_battery_read_time = 0
         
         self.lss = None
         self.lsq = None
+        self.is_armed = False
         
-        self.esc.duty_u16(duty)
+        self.esc.duty_u16(4915)
         
         self.last_telemetry_time = 0
         
+        self.camera_start_time = 0
+        self.is_camera_on = False
+        self.allow_camera = False
+        
+        self.allowance_remaining = 0
+        self.cooldown_remaining = 0
+        
+        try:
+            with open("camera_allowance_variable.txt", "x") as file:
+                file.write("0") # assume no allowance for safety
+            self.camera_allowance = 0
+        except OSError:
+            with open("camera_allowance_variable.txt", 'r') as file:
+                self.camera_allowance = float(file.read())
+        
+        self.camera_cooldown = 300 # 300 sec, 5 min
+        self.camera_cooldown_start_time = 0
+        
+        self.elrs_connection = None
+    
+
+    def _save_camera_allowance(self):
+        try:
+            with open("camera_allowance_variable.txt", "w") as f:
+                f.write(str(self.camera_allowance))
+        except OSError:
+            pass 
+ 
+ 
+    def relay_update(self):
+        now = time.time()
+        if self.is_camera_on:
+            # camera is on
+            self.allowance_remaining = max(0, self.camera_allowance - (now - self.camera_start_time))
+            self.cooldown_remaining = 0
+            elapsed = now - self.camera_start_time
+            if elapsed >= self.camera_allowance:
+                self._force_off()
+                self.camera_cooldown_start_time = now
+                self.allow_camera = False
+        elif not self.allow_camera:
+            # on cooldown
+            self.cooldown_remaining = max(0, self.camera_cooldown - (now - self.camera_cooldown_start_time))
+            self.allowance_remaining = 0
+            if now - self.camera_cooldown_start_time >= self.camera_cooldown:
+                self.allow_camera = True
+                self.camera_allowance = 180
+                self._save_camera_allowance()
+        else:
+            # camera off, allowed, not on cooldown
+            self.allowance_remaining = self.camera_allowance
+            self.cooldown_remaining = 0
+
+
     def relay_on(self):
-        self.relay.init(Pin.OUT, value=0)   # drive low, sinks current, relay ON
+        """Called when the camera is wanted on"""
+        if not self.allow_camera or self.is_camera_on:
+            return
+        self.relay.init(Pin.OUT, value=0)
+        self.is_camera_on = True
+        self.camera_start_time = time.time()
+
 
     def relay_off(self):
+        """Called to turn the camera off and reset/change/save allowance and cooldown variables"""
+        if not self.is_camera_on:
+            return
         self.relay.init(Pin.IN)
+        self.is_camera_on = False
+        elapsed = time.time() - self.camera_start_time
+        self.camera_allowance = max(0, self.camera_allowance - elapsed)
+        self._save_camera_allowance()
+        if self.camera_allowance <= 0:
+            self.camera_cooldown_start_time = time.time()
+            self.allow_camera = False
 
+    def _force_off(self):
+        """Helper for turning running camera off"""
+        self.relay.init(Pin.IN)
+        self.is_camera_on = False
+        self.camera_allowance = 0
+        self._save_camera_allowance()
     
-    def read_battery_voltage(self) -> float:
-        total = 0
-        for _ in range(10):
-            total += self.battery_adc_pin.read_u16()
-        
-        reading = total // 10
-        
-        # voltage at adc_pin
-        pin_voltage = (reading / 65535) * 3.3
-        
-        # pin voltage converted back to the correlated battery voltage
-        battery_voltage = pin_voltage * ((10000 + 2000) / 2000)
-        
-        return battery_voltage
     
-
-    def read_vtx_temp(self) -> float:
-        total = 0
-        for _ in range(10):
-            total += self.vtx_temp_adc_pin.read_u16()
+    def read_battery_voltage(self, now=False) -> None:
+        """Updates self.battery_voltage when called from asoc adc pin if it has been sufficiently long"""
+        if time.ticks_diff(time.ticks_ms(), self.last_battery_read_time) >= 2000 or now:
+            total = 0
+            for _ in range(10):
+                total += self.battery_adc_pin.read_u16()
+            
+            reading = total // 10
+            
+            # voltage at adc_pin
+            pin_voltage = (reading / 65535) * 3.3
+            
+            # pin voltage converted back to the correlated battery voltage
+            battery_voltage = pin_voltage * ((10000 + 2000) / 2000)
+            
+            if battery_voltage < 8:
+                self.battery_voltage = 0
+            else:
+                self.battery_voltage = battery_voltage
+            
+            
+            self.last_battery_read_time = time.ticks_ms()
         
-        reading = total // 10
-        
-        # voltage at adc_pin
-        v_out = (reading / 65535) * 3.3
-        
-        r_ntc = 10000 * ((5 / v_out) - 1.0)
-
-        # Steinhart-Hart / Beta Parameter Equation
-        # 1/T = 1/T25 + (1/B) * ln(R / R25)
-        temp_kelvin = 1.0 / ((1.0 / 298.15) + (math.log(r_ntc / 10000) / 3950.0))
-        temp_celsius = temp_kelvin - 273.15
-        
-        return temp_celsius
+        time.sleep_ms(10)
     
 
     def steering(self, angle) -> None:
-        if angle < 30:
-            angle = 30
-        elif angle > 150:
-            angle = 150
+        if angle < 60:
+            angle = 60
+        elif angle > 120:
+            angle = 120
                 
         duty = int(1637 + (angle / 180) * (8192 - 1638))
         self.servo.duty_u16(duty)
             
             
-    def throttle(self, raw_value, gear_value) -> None:
+    def throttle(self, raw_value, gear_value, range_) -> None:
         if raw_value < 174:
             raw_value = 174
         elif raw_value > 1811:
@@ -108,14 +178,21 @@ class Main():
         else:
             gear = "neutral"
             
+        if range_ > 1000:
+            range_multiplier = 1.0
+        else:
+            range_multiplier = 0.5
+            
         # map joystick range (1811 - 174), to 3276 - 6553 (1ms to 2ms PWM signal)
             
         if gear == 'drive':
-            duty = (raw_value - 174) + 4915 
+            duty = ((raw_value - 174) * range_multiplier) + 4915 
         elif gear == 'reverse':
-            duty = 4915 - (raw_value - 174)
+            duty = 4915 - ((raw_value - 174) * range_multiplier)
         else:  # neutral or fallback
             duty = 4915
+                                    
+        self.esc.duty_u16(int(duty))
                 
 
     def crsf_crc8(self, data: bytes) -> int:
@@ -176,7 +253,7 @@ class Main():
                                 channels[6] = ((data[8] >> 2) | (data[9] << 6)) & 0x07FF
                                 channels[7] = ((data[9] >> 5) | (data[10] << 3)) & 0x07FF
                                 
-                            elif packet_type == 0x1E: # link stats frame
+                            elif packet_type == 0x14: # link stats frame
                                 self.lss = -payload[1]
                                 self.lsq = payload[3]
                                 
@@ -205,14 +282,16 @@ class Main():
     
     
     def initialise(self):
+        self.relay_off()
         self.boot_led.value(0)
         self.main_led.value(1)
-        while (self.battery_voltage is None) or (self.vtx_temp is None) or (self.elrs_connection is None):
-            self.read_battery_voltage = self.read_battery_voltage()
-            self.read_vtx_temp = self.vtx_temp()
+        while (self.battery_voltage is None) or  (self.elrs_connection is None):
+            self.read_battery_voltage(True)
             data = self.read_control()
             if data is not None:
                 self.elrs_connection = data["last_signal_strength"]
+            
+            time.sleep(0.01)
         
         self.relay_off()
     
@@ -220,48 +299,51 @@ class Main():
     def control(self):
         data = self.read_control()
         if data is not None:
-            self.throttle(data["throttle"], data["gear"])
-            self.steering(data["steering"])
-    
+            steering_angle = ((data["steering"] - 174) * 60 / (1811 - 174)) + 60
+            if data is not None:
+                if data["armed"] > 1000:
+                    self.is_armed = True
+                    self.throttle(data["throttle"], data["gear"], data["throttle_range"])
+                    self.steering(steering_angle)
+                    
+                    if data["camera"] > 1000:
+                        self.camera_control_state = True
+                    else:
+                        self.camera_control_state = False
+            else:
+                self.is_armed = False
+
+
     def telemetry(self) -> None:
-        if self.uart_telem.any():
-            telemetry = self.uart_telem.readline()
-            if telemetry:
-                data_str = telemetry.decode('utf-8').strip()
-                
-                control = json.loads(data_str)
-                
-                steering = control.get("steering", 0)
-                throttle = control.get("throttle", 0)
-                gear = control.get("gear", 0)
-                
-                if throttle and gear:
-                    self.throttle(throttle, gear)
-                
-                if steering:
-                    self.steering(steering)
-        
-        if time.ticks_diff(time.ticks_ms(), last_telemetry_time) >= 200:
+        if time.ticks_diff(time.ticks_ms(), self.last_telemetry_time) >= 200:
             logs = None
             try:
                 with open("error_log.txt", "r") as file:
                     logs = file.read()
-                # Clear contents after reading
-                with open("error_log.txt", "w") as file:
-                    file.write("")
             except Exception as e:
-                logs = f"Error reading log: {e}"
-                
+                pass
+            
+            if self.battery_voltage < 9:
+                battery_info = "battery not connected"
+            else:
+                battery_info = self.battery_voltage
+            
             telemetry_data = {
-                "battery voltage" : self.read_battery_voltage(),
-                "vtx temp" : self.read_vtx_temp(),
-                "error logs" : logs
+                "battery voltage" : battery_info,
+                "camera allowance" : round(self.camera_allowance, 1),
+                "camera cooldown" : round(self.camera_cooldown, 1),
+                "elrs connection" : self.lss,
+                "error logs" : logs,
+                "uptime" : int(time.time() - self.start_time)
                 }
             
             msg = json.dumps(telemetry_data) + "\n"
-            self.uart_telem.write(msg.encode('utf-8'))
+            msg = msg.encode('utf-8')
+            self.uart_telem.write(msg)
             
-            last_telemetry_time = time.ticks_ms()
+            print(msg)
+            
+            self.last_telemetry_time = time.ticks_ms()
         
         time.sleep_ms(10)
         
@@ -269,6 +351,7 @@ class Main():
     def mainloop(self):
         while True:
             self.read_battery_voltage()
-            self.read_vtx_temp()
             self.control()
+            self.relay_update()
             self.telemetry()
+

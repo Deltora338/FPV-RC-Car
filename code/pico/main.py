@@ -1,47 +1,46 @@
-"""Main file which imports and runs the main loop code
+"""Main file which imports and runs the main loop code from
+config.py.
 """
 
-from machine import Pin, PWM, UART
+from config import Main
 import time
-from config import *
 
-servo.freq(50)
 
-esc.freq(50)  # standard freq
-esc.duty_u16(ESC_DUTY_NEUTRAL)  # neutral duty cycle
+def run(time_input, camera_input):
+    # Instantiate and initialize hardware once outside the execution loop
+    try:
+        script = Main(time_input, camera_input)
+        script.initialise()
+    except Exception as e:
+        log_error(e)
+        return
 
-boot_led.value(0)
-main_led.value(1)
+    # Run mainloop with error handling
+    while True:
+        try:
+            script.mainloop()
+        except Exception as e:
+            log_error(e)
+            time.sleep(1)  # Brief delay before retrying to prevent rapid loop lockup
 
-while True:
-    rx_control = read_control(controller_data['last_signal_strength'],
-                              controller_data['last_signal_quality'])
-    
-    if rx_control is not None:
-        controller_data = rx_control
-        
-        raw_steering = controller_data['steering']
-        
-        # gear lever either 174, 992 or 1811
-        if controller_data['gear'] > 1000:
-            gear = "reverse"
-        elif controller_data['gear'] < 500:
-            gear = "drive"
-        else:
-            gear = "neutral"
-        
-        steering_angle = round((raw_steering - JOYSTICK_MIN) * (55 - 125) / (JOYSTICK_RANGE) + 125)
-        steering((180 - steering_angle), servo) # servo is mounted upside down, so invert the input
-        
-        raw_throttle = controller_data['throttle']
-        throttle(raw_throttle, esc, gear)
-        
-        # print Debug info
-        ch = controller_data['raw_channels']
-        print(f'Throttle: {ch[2]}')
-        print(f'Steering {abs(ch[0] - 992)} {"left" if (ch[0] - 992) <= 0 else "right"}')
-        # print(f'Signal: {controller_data["last_signal_strength"]}dBm, {controller_data["last_signal_quality"]}%')
-    
-    time.sleep(0.01)
+def log_error(e):
+    logs = ""
+    # Safely read existing logs if the file exists
+    try:
+        with open("error_log.txt", "r") as file:
+            logs = file.read()
+    except OSError:
+        pass  # File doesn't exist yet, start with empty string
 
+    # Append new error log
+    try:
+        with open("error_log.txt", "w") as file:
+            file.write(f"{logs}\n{e}".strip())
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    time_ = time.time()
+    run(time_)
 

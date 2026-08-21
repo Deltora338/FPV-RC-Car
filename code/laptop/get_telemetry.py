@@ -2,8 +2,8 @@ import serial
 import json
 import time
 
-PORT = "COM16"
-BAUD = 115200
+PORT = "COM15"
+BAUD = 57600
 
 ser = serial.Serial(PORT, BAUD, timeout=1)
 
@@ -25,5 +25,5 @@ def read_telemetry():
 while True:
     telem = read_telemetry()
     if telem:
-        print(telem["battery voltage"], telem["vtx temp"], telem["error logs"])
-    time.sleep(0.01)
+        print(telem)
+    time.sleep(0.05)
