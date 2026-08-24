@@ -25,7 +25,7 @@ class Main():
 
         self.boot_led = Pin(25, Pin.OUT) # 16
 
-        self.relay = Pin(14, Pin.OUT, value=1)
+        self.relay = Pin(14, Pin.IN)
 
         # default for self.initialse
         self.battery_voltage = None
@@ -39,89 +39,92 @@ class Main():
         
         self.last_telemetry_time = 0
         
-        self.camera_start_time = 0
+        self.MAX_ALLOWANCE = 180.0  # 3 minutes allowed total on-time
+        self.MAX_COOLDOWN = 300.0   # 5 minutes cooldown required
+        
         self.is_camera_on = False
-        self.allow_camera = False
+        self.allow_camera = True
         self.camera_control_state = False
         
-        self.allowance_remaining = 0
-        self.cooldown_remaining = 0
+        self.camera_start_time = 0.0
+        self.camera_cooldown_start_time = 0.0
         
-        try:
-            with open("camera_allowance_variable.txt", "x") as file:
-                file.write("0") # assume no allowance for safety
-            self.camera_allowance = 0
-        except OSError:
-            with open("camera_allowance_variable.txt", 'r') as file:
-                self.camera_allowance = float(file.read())
-        
-        self.camera_cooldown = 300 # 300 sec, 5 min
-        self.camera_cooldown_start_time = 0
-        
+        self.allowance_remaining = self.MAX_ALLOWANCE
+        self.cooldown_remaining = 0.0
         self.elrs_connection = None
-    
-
-    def _save_camera_allowance(self):
-        try:
-            with open("camera_allowance_variable.txt", "w") as f:
-                f.write(str(self.camera_allowance))
-        except OSError:
-            pass 
- 
- 
-    def relay_update(self):
-        now = time.time()
-        if self.is_camera_on:
-            # camera is on
-            self.allowance_remaining = max(0, self.camera_allowance - (now - self.camera_start_time))
-            self.cooldown_remaining = 0
-            elapsed = now - self.camera_start_time
-            if elapsed >= self.camera_allowance:
-                self._force_off()
-                self.camera_cooldown_start_time = now
-                self.allow_camera = False
-        elif not self.allow_camera:
-            # on cooldown
-            self.cooldown_remaining = max(0, self.camera_cooldown - (now - self.camera_cooldown_start_time))
-            self.allowance_remaining = 0
-            if now - self.camera_cooldown_start_time >= self.camera_cooldown:
-                self.allow_camera = True
-                self.camera_allowance = 180
-                self._save_camera_allowance()
-        else:
-            # camera off, allowed, not on cooldown
-            self.allowance_remaining = self.camera_allowance
-            self.cooldown_remaining = 0
-
 
     def relay_on(self):
-        """Called when the camera is wanted on"""
-        if not self.allow_camera or self.is_camera_on:
-            return
-        self.relay.init(Pin.OUT, value=0)
-        self.is_camera_on = True
-        self.camera_start_time = time.time()
-
+        # Hardware relay activation logic here
+        self.relay.init(Pin.OUT, value=1)
 
     def relay_off(self):
-        """Called to turn the camera off and reset/change/save allowance and cooldown variables"""
-        if not self.is_camera_on:
-            return
+        # Hardware relay deactivation logic here
         self.relay.init(Pin.IN)
-        self.is_camera_on = False
-        elapsed = time.time() - self.camera_start_time
-        self.camera_allowance = max(0, self.camera_allowance - elapsed)
-        self._save_camera_allowance()
-        if self.camera_allowance <= 0:
-            self.camera_cooldown_start_time = time.time()
-            self.allow_camera = False
+        
+    def set_relay(self, state: bool):
+        """Helper to ensure relay hardware functions are only called on state changes."""
+        if state != self.relay_is_active:
+            self.relay_is_active = state
+            if state:
+                self.relay_on()
+            else:
+                self.relay_off()
 
-    def _force_off(self):
-        """Helper for turning running camera off"""
-        self.relay.init(Pin.IN)
-        self.is_camera_on = False
-        self.camera_allowance = 0
-        self._save_camera_allowance()
+    def relay_update(self):
+        now = time.time()
+
+        if self.is_camera_on:
+            current_session_elapsed = now - self.camera_start_time
+            session_allowance_remaining = (
+                self.session_start_allowance - current_session_elapsed
+            )
+            self.allowance_remaining = max(0.0, session_allowance_remaining)
+
+            # Case 1: Switch turned OFF manually
+            if not self.camera_control_state:
+                self.set_relay(False)
+                self.is_camera_on = False
+
+                if self.allowance_remaining < 5.0:
+                    self.allowance_remaining = 0.0
+                    self.allow_camera = False
+                    self.camera_cooldown_start_time = now
+
+            # Case 2: Allowance fully used up
+            elif self.allowance_remaining <= 0.0:
+                self.set_relay(False)
+                self.is_camera_on = False
+                self.allow_camera = False
+                self.camera_cooldown_start_time = now
+
+            else:
+                # Keep physical relay active without re-triggering hardware calls
+                self.set_relay(True)
+
+        else:
+            # Ensure physical relay stays off while camera state is off
+            self.set_relay(False)
+
+            # Handle Cooldown State
+            if not self.allow_camera:
+                elapsed_cooldown = now - self.camera_cooldown_start_time
+                self.cooldown_remaining = max(
+                    0.0, self.MAX_COOLDOWN - elapsed_cooldown
+                )
+
+                if self.cooldown_remaining <= 0.0:
+                    self.allow_camera = True
+                    self.allowance_remaining = self.MAX_ALLOWANCE
+            else:
+                self.cooldown_remaining = 0.0
+
+            # Turn ON trigger
+            if self.allow_camera and self.camera_control_state:
+                self.is_camera_on = True
+                self.camera_start_time = now
+                self.session_start_allowance = self.allowance_remaining
+                self.set_relay(True)
+
     
     
     def read_battery_voltage(self, now=False) -> None:
@@ -299,13 +302,13 @@ class Main():
                     self.is_armed = True
                     self.throttle(data["throttle"], data["gear"], data["throttle_range"])
                     self.steering(steering_angle)
-                    
-                    if data["camera"] > 1000:
-                        self.camera_control_state = True
-                    else:
-                        self.camera_control_state = False
                 else:
                     self.is_armed = False
+    
+                if data["camera"] > 1000:
+                    self.camera_control_state = True
+                else:
+                    self.camera_control_state = False
 
 
     def telemetry(self) -> None:
@@ -323,12 +326,13 @@ class Main():
                 battery_info = self.battery_voltage
             
             telemetry_data = {
-                "battery voltage" : battery_info,
-                "camera allowance" : round(self.camera_allowance, 1),
-                "camera cooldown" : round(self.camera_cooldown, 1),
-                "elrs connection" : self.lss,
+                "voltage" : battery_info,
+                "camera allowance" : round(self.allowance_remaining, 1),
+                "camera cooldown" : round(self.cooldown_remaining, 1),
+                "elrs " : f'{self.lss}dbm',
                 "error logs" : logs,
-                "uptime" : int(time.time() - self.start_time)
+                "uptime" : int(time.time() - self.start_time),
+                "armed" : self.is_armed
                 }
             
             msg = json.dumps(telemetry_data) + "\n"
@@ -346,10 +350,6 @@ class Main():
         while True:
             self.read_battery_voltage()
             self.control()
-            if self.camera_control_state:
-                self.relay_on()
-            else:
-                self.relay_off()
             self.relay_update()
             self.telemetry()
             
