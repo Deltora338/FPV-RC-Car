@@ -13,7 +13,7 @@ except Exception as e:
     print(e)
     com = False
 
-telemetry_string = "No COM port connected"
+telemetry_string = ""
 
 if not cap.isOpened():
     print("Error: Could not open webcam.")
