@@ -200,9 +200,8 @@ class Window:
 
         self.cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
 
-        # DSHOW can report isOpened() True before the device is actually
-        # ready to deliver a frame — give it a couple of tries.
         ok = False
+
         for _ in range(5):
             if self.cap.isOpened():
                 ok, _ = self.cap.read()
@@ -225,7 +224,7 @@ class Window:
         ret, frame = self.cap.read()
         if ret:
             stale = (time.time() - self.last_telemetry_time) > 2.0
-            colour = (0, 0, 255) if stale else (0, 255, 0)  # BGR — red if link is dead
+            colour = (0, 0, 255) if stale else (0, 255, 0)  # red for bad telem
 
 
             locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
@@ -289,16 +288,7 @@ class Window:
 
         for i, info in enumerate(telem):
             if i < len(locations):
-                cv2.putText(
-                    frame,
-                    str(info),
-                    locations[i],
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    colour,
-                    2,
-                    cv2.LINE_AA
-                )
+                cv2.putText(frame, str(info), locations[i], cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2, cv2.LINE_AA)
 
         return frame
 
