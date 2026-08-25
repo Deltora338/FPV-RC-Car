@@ -1,3 +1,4 @@
+from typing import Any
 import cv2
 import serial
 import time
@@ -13,11 +14,11 @@ start_time = time.time()
 def read_telemetry(ser: serial.Serial | None) -> dict[str, str | int] | None:
     """Reads incoming telemetry data from the car and returns it as a dictionary"""
     if ser is None:
-        return {"voltage" : "11.9V",
+        return {"voltage" : "--V",
                 "camera allowance" : 180,
                 "camera cooldown" : 0,
                 "elrs " : '-x dbm',
-                "error logs" : "error logs",
+                "error logs" : "--",
                 "uptime" : int(time.time() - start_time),
                 "armed" : False
                 }
@@ -30,6 +31,13 @@ def read_telemetry(ser: serial.Serial | None) -> dict[str, str | int] | None:
             data_str = line.decode('utf-8').strip() 
             if not data_str:
                 return None
+            try:
+                with open("data_logs.txt", 'x') as file:
+                    file.write(f'{data_str}\n')
+            except FileExistsError:
+                with open("data_logs.txt", 'a') as file:
+                    file.write(f'{data_str}\n')
+
             return json.loads(data_str)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None
@@ -75,17 +83,17 @@ class Window:
             self.ser = None
 
         self.cameras_radiobuttons: list[tk.Radiobutton] = []
-        self.selected_camera_index = tk.IntVar(value=0)  # Default to 0 (usually built in camera)
+        self.selected_camera_index = tk.IntVar(value=-1)  # Default to 0 (usually built in camera)
 
         self.image = tk.Label(self.root)
         self.image.grid(row=0, column=1, rowspan=10)
 
         for index in find_available_cameras():
             rb = tk.Radiobutton(self.root, text=f"Camera {index + 1}", variable=self.selected_camera_index, value=index, command=lambda idx=index: self.on_camera_button_selected(idx), font=("Times", 12))
-            rb.grid(row=index, column=0, sticky=tk.W)
+            rb.grid(row=index, column=0, sticky=tk.W, padx=10, pady=10)
             self.cameras_radiobuttons.append(rb)
 
-        self.telemetry_queue = queue.Queue()
+        self.telemetry_queue: Any = queue.Queue()
         self.telemetry: dict[str, str | int] | None = {}          # latest known values
         self.last_telemetry_time = 0
 
@@ -98,10 +106,11 @@ class Window:
         self.poll_telemetry()  # start draining the queue on the GUI thread
 
         self.fpv_button = tk.Button(
-        self.root, text="Launch FPV view", command=self.launch_fpv_view)
-        self.fpv_button.grid(row=len(self.cameras_radiobuttons), column=0, sticky=tk.W, pady=10)
+        self.root, text="Launch dedicated\nFPV window", command=self.launch_fpv_view)
+        self.fpv_button.grid(row=len(self.cameras_radiobuttons), column=0, sticky=tk.W, pady=10, padx=10)
 
     def launch_fpv_view(self):
+        # 1. Cancel ongoing Tkinter video frame updates
         if self._after_id is not None:
             self.image.after_cancel(self._after_id)
             self._after_id = None
@@ -110,22 +119,32 @@ class Window:
             messagebox.showerror("No camera", "Select a camera first")
             return
 
-        cap = self.cap          # hang on to it — self.cap won't survive destroy()
-        self.root.destroy()     # tears down Tkinter; mainloop() returns after this call unwinds
-        self._run_opencv_view(cap)
+        # 2. Store current camera index before destroying the GUI
+        camera_idx = self.selected_camera_index.get()
+        
+        # Release old cap bound to Tkinter
+        self.cap.release()
+        self.cap = None
+
+        self.root.destroy()     # Destroy Tkinter window
+
+        # Re-open a fresh VideoCapture instance for OpenCV
+        fresh_cap = cv2.VideoCapture(camera_idx, cv2.CAP_DSHOW)
+        self._run_opencv_view(fresh_cap)
 
     def _run_opencv_view(self, cap: cv2.VideoCapture):
         window_name = "FPV Feed"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
         while cap.isOpened():
-            # window was closed via the OS X button rather than 'q'
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
                 break
 
             ret, frame = cap.read()
-            if not ret:
-                break
+
+            # Ensure the frame was returned AND has valid dimensions
+            if not ret or frame.size == 0:
+                continue
 
             self._drain_telemetry_queue()
             frame = self.draw_overlay(frame)
@@ -195,18 +214,25 @@ class Window:
         ret, frame = self.cap.read()
         if ret:
             stale = (time.time() - self.last_telemetry_time) > 2.0
-            color = (0, 0, 255) if stale else (0, 255, 0)  # BGR — red if link is dead
+            colour = (0, 0, 255) if stale else (0, 255, 0)  # BGR — red if link is dead
 
-            lines = [
-                f"V: {self.telemetry.get('voltage', '--')} V",
-                f"THR: {self.telemetry.get('throttle', '--')}",
-                f"STR: {self.telemetry.get('steering', '--')}",
+
+            locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
+
+            telem = [
+                f"Battery: {self.telemetry.get('voltage', '--')}",
+                f"Armed: {self.telemetry.get('armed', '--')}",
+                f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
+                f"Uptime: {self.telemetry.get("uptime", "--")}",
+                f"Error log: {self.telemetry.get("error logs", "--")}",
+                f"Camera allowance: {self.telemetry.get("camera allowance", "--")},",
+                f" Cooldown: {self.telemetry.get("camera cooldown", "--")}",
                 "NO TELEMETRY" if stale else "LINK OK",
             ]
-            for i, text in enumerate(lines):
-                y = 24 + i * 22
-                cv2.putText(frame, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6, color, 2, cv2.LINE_AA)
+
+            for i, info in enumerate(telem):
+                cv2.putText(frame, str(info), locations[i], cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6, colour, 2, cv2.LINE_AA)
 
             cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(cv2image)
@@ -222,27 +248,34 @@ class Window:
                 data = self.telemetry_queue.get_nowait()
                 self.telemetry.update(data)
                 self.last_telemetry_time = time.time()
-        except queue.Empty:
+        except (queue.Empty, Exception):
             pass
 
-    def poll_telemetry(self):
-        self._drain_telemetry_queue()
-        self.root.after(50, self.poll_telemetry)
 
     def draw_overlay(self, frame):
-        stale = (time.time() - self.last_telemetry_time) > 2.0
-        color = (0, 0, 255) if stale else (0, 255, 0)
-        lines = [
-            f"V: {self.telemetry.get('voltage', '--')} V",
-            f"THR: {self.telemetry.get('throttle', '--')}",
-            f"STR: {self.telemetry.get('steering', '--')}",
-            "NO TELEMETRY" if stale else "LINK OK",
-        ]
-        for i, text in enumerate(lines):
-            y = 24 + i * 22
-            cv2.putText(frame, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, color, 2, cv2.LINE_AA)
-        return frame
+        """Takes current telemetry and writes it over the current frame"""
+        stale = (time.time() - self.last_telemetry_time) > 2.0  # checks if telem packet was recieved too quickly
+        if stale:
+            return frame
+        
+        colour =  (0, 255, 0)
+
+        locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
+
+        telem = [
+                f"Battery: {self.telemetry.get('voltage', '--')}",
+                f"Armed: {self.telemetry.get('armed', '--')}",
+                f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
+                f"Uptime: {self.telemetry.get("uptime", "--")}",
+                f"Error log: {self.telemetry.get("error logs", "--")}",
+                f"Camera allowance: {self.telemetry.get("camera allowance", "--")},",
+                f" Cooldown: {self.telemetry.get("camera cooldown", "--")}",
+                "NO TELEMETRY" if stale else "LINK OK",
+            ]
+
+        for i, info in enumerate(telem):
+            cv2.putText(frame, str(info), locations[i], cv2.FONT_HERSHEY_SIMPLEX,
+                0.6, colour, 2, cv2.LINE_AA)
 
 
 
