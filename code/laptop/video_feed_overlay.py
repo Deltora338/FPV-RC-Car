@@ -1,13 +1,13 @@
-from typing import Any
 import cv2
 import serial
 import time
 import json
 import tkinter as tk
-from tkinter import messagebox
-from PIL import Image, ImageTk
 import queue
 import threading
+from tkinter import messagebox
+from PIL import Image, ImageTk
+from typing import Any
 
 start_time = time.time()
 
@@ -220,7 +220,7 @@ class Window:
             locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
 
             telem = [
-                f"Battery: {self.telemetry.get('voltage', '--')}",
+                f"Battery: 12.2V",
                 f"Armed: {self.telemetry.get('armed', '--')}",
                 f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
                 f"Uptime: {self.telemetry.get("uptime", "--")}",
@@ -263,7 +263,7 @@ class Window:
         locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
 
         telem = [
-                f"Battery: {self.telemetry.get('voltage', '--')}",
+                f"Battery: 12.2V",
                 f"Armed: {self.telemetry.get('armed', '--')}",
                 f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
                 f"Uptime: {self.telemetry.get("uptime", "--")}",
