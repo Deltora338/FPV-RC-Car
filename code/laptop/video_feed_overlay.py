@@ -119,17 +119,24 @@ class Window:
             messagebox.showerror("No camera", "Select a camera first")
             return
 
-        # 2. Store current camera index before destroying the GUI
+        # 2. Store camera index and release Tkinter capture
         camera_idx = self.selected_camera_index.get()
-        
-        # Release old cap bound to Tkinter
         self.cap.release()
         self.cap = None
 
-        self.root.destroy()     # Destroy Tkinter window
+        self.root.destroy()  # Destroy Tkinter window
 
-        # Re-open a fresh VideoCapture instance for OpenCV
+        # Small delay to allow camera hardware to reset handles
+        time.sleep(0.2)
+
+        # Re-open camera for OpenCV window
         fresh_cap = cv2.VideoCapture(camera_idx, cv2.CAP_DSHOW)
+        
+        # Ensure camera opens properly
+        if not fresh_cap.isOpened():
+            print("[ERROR] Could not reopen camera for FPV view.")
+            return
+
         self._run_opencv_view(fresh_cap)
 
     def _run_opencv_view(self, cap: cv2.VideoCapture):
@@ -142,14 +149,18 @@ class Window:
 
             ret, frame = cap.read()
 
-            # Ensure the frame was returned AND has valid dimensions
-            if not ret or frame.size == 0:
+            # Ensure valid frame before running telemetry or displaying
+            if not ret or frame is None or frame.size == 0 or frame.shape[0] == 0 or frame.shape[1] == 0:
+                time.sleep(0.01)
                 continue
 
             self._drain_telemetry_queue()
             frame = self.draw_overlay(frame)
 
-            cv2.imshow(window_name, frame)
+            # Double-check frame integrity before passing to imshow
+            if frame is not None and frame.shape[0] > 0 and frame.shape[1] > 0:
+                cv2.imshow(window_name, frame)
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
@@ -219,15 +230,18 @@ class Window:
 
             locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
 
+            if self.telemetry is None:
+                stale = True
+            
             telem = [
                 f"Battery: 12.2V",
                 f"Armed: {self.telemetry.get('armed', '--')}",
                 f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
-                f"Uptime: {self.telemetry.get("uptime", "--")}",
-                f"Error log: {self.telemetry.get("error logs", "--")}",
-                f"Camera allowance: {self.telemetry.get("camera allowance", "--")},",
-                f" Cooldown: {self.telemetry.get("camera cooldown", "--")}",
-                "NO TELEMETRY" if stale else "LINK OK",
+                f"Uptime: {self.telemetry.get('uptime', '--')}",
+                f"Error log: {self.telemetry.get('error logs', '--')}",
+                f"Camera allowance: {self.telemetry.get('camera allowance', '--')},",
+                f" Cooldown: {self.telemetry.get('camera cooldown', '--')}",
+                "NO TELEMETRY" if stale else 'LINK OK',
             ]
 
             for i, info in enumerate(telem):
@@ -254,28 +268,39 @@ class Window:
 
     def draw_overlay(self, frame):
         """Takes current telemetry and writes it over the current frame"""
-        stale = (time.time() - self.last_telemetry_time) > 2.0  # checks if telem packet was recieved too quickly
-        if stale:
+        if frame is None or frame.size == 0:
             return frame
-        
-        colour =  (0, 255, 0)
 
-        locations = [(10,470), (10,25), (355,470), (200,470), (10,52), (190,25), (440,25), (10,77)]
+        stale = (time.time() - self.last_telemetry_time) > 2.0
+        colour = (0, 0, 255) if stale else (0, 255, 0)
+
+        locations = [(10, 470), (10, 25), (355, 470), (200, 470), (10, 52), (190, 25), (440, 25), (10, 77)]
 
         telem = [
-                f"Battery: 12.2V",
-                f"Armed: {self.telemetry.get('armed', '--')}",
-                f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
-                f"Uptime: {self.telemetry.get("uptime", "--")}",
-                f"Error log: {self.telemetry.get("error logs", "--")}",
-                f"Camera allowance: {self.telemetry.get("camera allowance", "--")},",
-                f" Cooldown: {self.telemetry.get("camera cooldown", "--")}",
-                "NO TELEMETRY" if stale else "LINK OK",
-            ]
+            "Battery: 12.2V",
+            f"Armed: {self.telemetry.get('armed', '--')}",
+            f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
+            f"Uptime: {self.telemetry.get('uptime', '--')}",
+            f"Error log: {self.telemetry.get('error logs', '--')}",
+            f"Camera allowance: {self.telemetry.get('camera allowance', '--')}",
+            f"Cooldown: {self.telemetry.get('camera cooldown', '--')}",
+            "NO TELEMETRY" if stale else "LINK OK",
+        ]
 
         for i, info in enumerate(telem):
-            cv2.putText(frame, str(info), locations[i], cv2.FONT_HERSHEY_SIMPLEX,
-                0.6, colour, 2, cv2.LINE_AA)
+            if i < len(locations):
+                cv2.putText(
+                    frame,
+                    str(info),
+                    locations[i],
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    colour,
+                    2,
+                    cv2.LINE_AA
+                )
+
+        return frame
 
 
 
