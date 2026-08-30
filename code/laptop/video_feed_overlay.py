@@ -223,7 +223,10 @@ class Window:
 
         ret, frame = self.cap.read()
         if ret:
-            stale = (time.time() - self.last_telemetry_time) > 2.0
+            if self.ser is None:
+                stale = True
+            else:
+                stale = (time.time() - self.last_telemetry_time) > 2.0
             colour = (0, 0, 255) if stale else (0, 255, 0)  # red for bad telem
 
 
@@ -233,7 +236,7 @@ class Window:
                 stale = True
             
             telem = [
-                f"Battery: 12.2V",
+                f"Battery: --V",
                 f"Armed: {self.telemetry.get('armed', '--')}",
                 f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
                 f"Uptime: {self.telemetry.get('uptime', '--')}",
@@ -276,7 +279,7 @@ class Window:
         locations = [(10, 470), (10, 25), (355, 470), (200, 470), (10, 52), (190, 25), (440, 25), (10, 77)]
 
         telem = [
-            "Battery: 12.2V",
+            f"Battery: {self.telemetry.get('battery', '--V')}",
             f"Armed: {self.telemetry.get('armed', '--')}",
             f"ELRS connection: {self.telemetry.get('elrs ', '--dbm')}",
             f"Uptime: {self.telemetry.get('uptime', '--')}",
